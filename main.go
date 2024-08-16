@@ -101,6 +101,7 @@ func parseFlags() CmdConfig {
 	flag.StringVar(&config.podAzAnnotationKey, "pod-az-annotation-key", "", "pod annotation key for AZ Info, If not specified or key not found, will use sts name as AZ key")
 	flag.StringVar(&config.migrationState, "migration-state", "no-state", "[Databricks Internal] internal pantheon migration state info")
 	flag.Parse()
+
 	return config
 }
 
@@ -458,7 +459,7 @@ func (c *controller) registerMetrics(reg *prometheus.Registry) {
 		c.configmapChangeErrors.WithLabelValues(create).Add(0)
 		c.configmapChangeErrors.WithLabelValues(update).Add(0)
 		c.configmapChangeErrors.WithLabelValues(other).Add(0)
-		c.pantheonMigrationState.WithLabelValues(c.options.migrationState).Add(0)
+		c.pantheonMigrationState.WithLabelValues(c.options.migrationState).Add(1)
 		reg.MustRegister(
 			c.reconcileAttempts,
 			c.reconcileErrors,
