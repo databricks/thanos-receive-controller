@@ -24,10 +24,7 @@ linters:
   - perfsprint
   - maligned
   - gosec
-<<<<<<< HEAD
   - gocognit
-=======
->>>>>>> 2753f3f (support az aware hashring and multiple sts in one hashring (#129))
 
 linters-settings:
   errcheck:
