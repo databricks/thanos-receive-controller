@@ -4,7 +4,10 @@
     <option name="autoReloadType" value="ALL" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="66dcc214-2fdc-46fc-a9cc-cee852fa0814" name="Changes" comment="" />
+    <list default="true" id="66dcc214-2fdc-46fc-a9cc-cee852fa0814" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/main.go" beforeDir="false" afterPath="$PROJECT_DIR$/main.go" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -48,43 +51,43 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;Go Test.TestController in github.com/observatorium/thanos-receive-controller.executor&quot;: &quot;Run&quot;,
-    &quot;Go Test.TestController/OneHashringOneStatefulSet in github.com/observatorium/thanos-receive-controller (1).executor&quot;: &quot;Debug&quot;,
-    &quot;Go Test.TestController/OneHashringOneStatefulSet in github.com/observatorium/thanos-receive-controller (2).executor&quot;: &quot;Run&quot;,
-    &quot;Go Test.TestController/OneHashringOneStatefulSet in github.com/observatorium/thanos-receive-controller.executor&quot;: &quot;Debug&quot;,
-    &quot;Go Test.TestControllerWithAzAware in github.com/observatorium/thanos-receive-controller.executor&quot;: &quot;Run&quot;,
-    &quot;Go Test.TestControllerWithAzAware/OneHashringLabelKeyManyStatefulSets in github.com/observatorium/thanos-receive-controller (2).executor&quot;: &quot;Debug&quot;,
-    &quot;Go Test.TestControllerWithAzAware/OneHashringLabelKeyManyStatefulSets in github.com/observatorium/thanos-receive-controller.executor&quot;: &quot;Run&quot;,
-    &quot;Go Test.TestControllerWithAzAware/OneHashringManyStatefulSets in github.com/observatorium/thanos-receive-controller.executor&quot;: &quot;Run&quot;,
-    &quot;Go Test.TestControllerWithEndpointStruct in github.com/observatorium/thanos-receive-controller.executor&quot;: &quot;Run&quot;,
-    &quot;Go Test.go test github.com/observatorium/thanos-receive-controller.executor&quot;: &quot;Run&quot;,
-    &quot;Go Test.main_test.go.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.CodyProjectSettingsMigration&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.go.formatter.settings.were.checked&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.go.migrated.go.modules.settings&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.go.modules.automatic.dependencies.download&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.go.modules.go.list.on.any.changes.was.set&quot;: &quot;true&quot;,
-    &quot;WebServerToolWindowFactoryState&quot;: &quot;false&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;dev5&quot;,
-    &quot;go.import.settings.migrated&quot;: &quot;true&quot;,
-    &quot;go.sdk.automatically.set&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/Users/christopher.li/thanos-receive-controller&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;project.structure.last.edited&quot;: &quot;Project&quot;,
-    &quot;project.structure.proportion&quot;: &quot;0.15&quot;,
-    &quot;project.structure.side.proportion&quot;: &quot;0.0&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;project.propVCSSupport.DirectoryMappings&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Go Test.TestController in github.com/observatorium/thanos-receive-controller.executor": "Run",
+    "Go Test.TestController/OneHashringOneStatefulSet in github.com/observatorium/thanos-receive-controller (1).executor": "Debug",
+    "Go Test.TestController/OneHashringOneStatefulSet in github.com/observatorium/thanos-receive-controller (2).executor": "Run",
+    "Go Test.TestController/OneHashringOneStatefulSet in github.com/observatorium/thanos-receive-controller.executor": "Debug",
+    "Go Test.TestControllerWithAzAware in github.com/observatorium/thanos-receive-controller.executor": "Run",
+    "Go Test.TestControllerWithAzAware/OneHashringLabelKeyManyStatefulSets in github.com/observatorium/thanos-receive-controller (2).executor": "Debug",
+    "Go Test.TestControllerWithAzAware/OneHashringLabelKeyManyStatefulSets in github.com/observatorium/thanos-receive-controller.executor": "Run",
+    "Go Test.TestControllerWithAzAware/OneHashringManyStatefulSets in github.com/observatorium/thanos-receive-controller.executor": "Run",
+    "Go Test.TestControllerWithEndpointStruct in github.com/observatorium/thanos-receive-controller.executor": "Run",
+    "Go Test.go test github.com/observatorium/thanos-receive-controller.executor": "Run",
+    "Go Test.main_test.go.executor": "Run",
+    "RunOnceActivity.CodyProjectSettingsMigration": "true",
+    "RunOnceActivity.OpenProjectViewOnStart": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.go.formatter.settings.were.checked": "true",
+    "RunOnceActivity.go.migrated.go.modules.settings": "true",
+    "RunOnceActivity.go.modules.automatic.dependencies.download": "true",
+    "RunOnceActivity.go.modules.go.list.on.any.changes.was.set": "true",
+    "WebServerToolWindowFactoryState": "false",
+    "git-widget-placeholder": "main",
+    "go.import.settings.migrated": "true",
+    "go.sdk.automatically.set": "true",
+    "last_opened_file_path": "/Users/christopher.li/thanos-receive-controller",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "project.structure.last.edited": "Project",
+    "project.structure.proportion": "0.15",
+    "project.structure.side.proportion": "0.0",
+    "settings.editor.selected.configurable": "project.propVCSSupport.DirectoryMappings",
+    "vue.rearranger.settings.migration": "true"
   }
-}</component>
+}]]></component>
   <component name="RunManager" selected="Go Test.TestControllerWithAzAware/OneHashringManyStatefulSets in github.com/observatorium/thanos-receive-controller">
     <configuration default="true" type="OPA_TEST_RUN_CONFIGURATION" factoryName="Opa configuration factory">
       <option name="additionalargs" value="" />
