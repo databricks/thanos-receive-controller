@@ -777,6 +777,7 @@ func TestControllerWithAzAware(t *testing.T) {
 				port:                   port,
 				scheme:                 "http",
 				useAzAwareHashRing:     true,
+				migrationState:         "hello",
 			}
 			klient := fake.NewSimpleClientset()
 			cleanUp := setupController(ctx, t, klient, opts)
