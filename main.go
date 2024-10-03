@@ -41,7 +41,8 @@ import (
 type label = string
 
 const (
-	defaultPort = 10901
+	defaultPort          = 10901
+	defaultReplicaFactor = 3
 
 	resyncPeriod                  = 5 * time.Minute
 	defaultScaleTimeout           = 5 * time.Second
@@ -548,6 +549,36 @@ func (c *controller) worker(ctx context.Context) {
 	}
 }
 
+func (c *controller) isProvisioned(statefulsets map[string][]*appsv1.StatefulSet) bool {
+	_, ok, err := c.cmapInf.GetStore().GetByKey(fmt.Sprintf("%s/%s", c.options.namespace, c.options.configMapGeneratedName))
+	if ok && err == nil {
+		level.Warn(c.logger).Log("msg", "could not fetch ConfigMap", "err", err)
+		// if the generated configmap is already present, we don't need to do anything
+		return true
+	}
+
+	if len(statefulsets) == 0 {
+		return false
+	}
+
+	for group, stsList := range statefulsets {
+		level.Info(c.logger).Log("msg", "checking statefulsets group", "group", group)
+		// at least 3 statefulsets need to be ready during provision per replication group
+		if len(stsList) < defaultReplicaFactor {
+			for _, sts := range stsList {
+				level.Info(c.logger).Log("msg", "not enough statefulsets found during provision < 3",
+					"sts", sts.Name,
+					"replicas", sts.Spec.Replicas,
+					"ready", sts.Status.ReadyReplicas)
+			}
+
+			return false
+		}
+	}
+
+	return true
+}
+
 func (c *controller) sync(ctx context.Context) {
 	c.reconcileAttempts.Inc()
 	configMap, ok, err := c.cmapInf.GetStore().GetByKey(fmt.Sprintf("%s/%s", c.options.namespace, c.options.configMapName))
@@ -628,6 +659,11 @@ func (c *controller) sync(ctx context.Context) {
 		time.Sleep(c.options.scaleTimeout) // Give some time for all replicas before they receive hundreds req/s
 	}
 
+	if !c.isProvisioned(statefulsets) {
+		level.Error(c.logger).Log("msg", "not enough statefulsets found during provision")
+		return
+	}
+
 	c.populate(ctx, hashrings, statefulsets)
 	level.Info(c.logger).Log("msg", "hashring populated", "hashring", fmt.Sprintf("%+v", hashrings))
 
@@ -647,7 +683,7 @@ func (c *controller) sync(ctx context.Context) {
 	}
 }
 
-func (c controller) waitForPod(ctx context.Context, name string) error {
+func (c *controller) waitForPod(ctx context.Context, name string) error {
 	//nolint:staticcheck
 	return wait.PollImmediate(time.Second, time.Minute, func() (bool, error) {
 		pod, err := c.klient.CoreV1().Pods(c.options.namespace).Get(ctx, name, metav1.GetOptions{})
