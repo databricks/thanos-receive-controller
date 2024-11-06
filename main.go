@@ -583,6 +583,7 @@ func PrettyPrintHashrings(hashrings []receive.HashringConfig) {
 	// Marshal the hashrings slice with indentation
 	prettyJSON, err := json.MarshalIndent(hashrings, "", "  ")
 	if err != nil {
+		fmt.Println("PrettyPrintHashrings marshal err")
 		return
 	}
 
