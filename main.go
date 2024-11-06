@@ -579,6 +579,18 @@ func (c *controller) isProvisioned(statefulsets map[string][]*appsv1.StatefulSet
 	return true
 }
 
+func PrettyPrintHashrings(hashrings []receive.HashringConfig) {
+	// Marshal the hashrings slice with indentation
+	prettyJSON, err := json.MarshalIndent(hashrings, "", "  ")
+	if err != nil {
+		return
+	}
+
+	// Print the resulting JSON string
+	fmt.Println(string(prettyJSON))
+	return
+}
+
 func (c *controller) sync(ctx context.Context) {
 	c.reconcileAttempts.Inc()
 	configMap, ok, err := c.cmapInf.GetStore().GetByKey(fmt.Sprintf("%s/%s", c.options.namespace, c.options.configMapName))
@@ -602,6 +614,7 @@ func (c *controller) sync(ctx context.Context) {
 
 		return
 	}
+	PrettyPrintHashrings(hashrings)
 
 	statefulsets := make(map[string][]*appsv1.StatefulSet)
 
