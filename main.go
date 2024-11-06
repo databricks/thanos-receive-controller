@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -57,6 +58,8 @@ const (
 	create label = "create"
 	update label = "update"
 	other  label = "other"
+
+	statefulsetDesiredReplicasAnnotationKey = "grafana.com/desired-replicas"
 )
 
 type CmdConfig struct {
@@ -568,7 +571,7 @@ func (c *controller) isProvisioned(statefulsets map[string][]*appsv1.StatefulSet
 			for _, sts := range stsList {
 				level.Info(c.logger).Log("msg", "not enough statefulsets found during provision < 3",
 					"sts", sts.Name,
-					"replicas", sts.Spec.Replicas,
+					"replicas", c.getStatefulsetDesiredReplicas(sts),
 					"ready", sts.Status.ReadyReplicas)
 			}
 
@@ -590,6 +593,21 @@ func PrettyPrintHashrings(hashrings []receive.HashringConfig) {
 	// Print the resulting JSON string
 	fmt.Println(string(prettyJSON))
 	return
+}
+
+func (c *controller) getStatefulsetDesiredReplicas(sts *appsv1.StatefulSet) int32 {
+	desiredReplicas, ok := sts.Annotations[statefulsetDesiredReplicasAnnotationKey]
+	if !ok {
+		level.Debug(c.logger).Log("msg", sts.Name, "desired replicas from spec:", *sts.Spec.Replicas)
+		return *sts.Spec.Replicas
+	}
+	replicas, err := strconv.Atoi(desiredReplicas)
+	if err != nil {
+		level.Debug(c.logger).Log("msg", sts.Name, "desired replicas from spec:", *sts.Spec.Replicas)
+		return *sts.Spec.Replicas
+	}
+	level.Debug(c.logger).Log("msg", sts.Name, "desired replicas from annotation:", int32(replicas))
+	return int32(replicas)
 }
 
 func (c *controller) sync(ctx context.Context) {
@@ -634,7 +652,7 @@ func (c *controller) sync(ctx context.Context) {
 		stsReplica, exist := c.replicas[sts.Name]
 		// If hashring is not initialized, need to wait for all pods ready within statefulset before generating hashring
 		if !exist && c.options.allowOnlyReadyReplicas {
-			for i := int32(0); i < *sts.Spec.Replicas; i++ {
+			for i := int32(0); i < c.getStatefulsetDesiredReplicas(sts); i++ {
 				start := time.Now()
 				podName := fmt.Sprintf("%s-%d", sts.Name, i)
 
@@ -645,10 +663,10 @@ func (c *controller) sync(ctx context.Context) {
 
 				level.Debug(c.logger).Log("msg", "waited until new pod was ready during hashring intialization", "pod", podName, "duration", time.Since(start))
 			}
-		} else if exist && stsReplica < *sts.Spec.Replicas {
+		} else if exist && stsReplica < c.getStatefulsetDesiredReplicas(sts) {
 			// If there's an increase in replicas we poll for the new replicas to be ready
 			// Iterate over new replicas to wait until they are running
-			for i := stsReplica; i < *sts.Spec.Replicas; i++ {
+			for i := stsReplica; i < c.getStatefulsetDesiredReplicas(sts); i++ {
 				start := time.Now()
 				podName := fmt.Sprintf("%s-%d", sts.Name, i)
 
@@ -661,7 +679,7 @@ func (c *controller) sync(ctx context.Context) {
 			}
 		}
 
-		c.replicas[sts.Name] = *sts.Spec.Replicas
+		c.replicas[sts.Name] = c.getStatefulsetDesiredReplicas(sts)
 
 		if _, ok := statefulsets[hashring]; !ok {
 			statefulsets[hashring] = []*appsv1.StatefulSet{}
@@ -735,7 +753,7 @@ func (c *controller) populate(ctx context.Context, hashrings []receive.HashringC
 		var endpoints []receive.Endpoint
 
 		for _, sts := range stsList {
-			for i := 0; i < int(*sts.Spec.Replicas); i++ {
+			for i := 0; i < int(c.getStatefulsetDesiredReplicas(sts)); i++ {
 				podName := fmt.Sprintf("%s-%d", sts.Name, i)
 				pod, err := c.klient.CoreV1().Pods(c.options.namespace).Get(ctx, podName, metav1.GetOptions{})
 
