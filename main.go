@@ -598,15 +598,15 @@ func PrettyPrintHashrings(hashrings []receive.HashringConfig) {
 func (c *controller) getStatefulsetDesiredReplicas(sts *appsv1.StatefulSet) int32 {
 	desiredReplicas, ok := sts.Annotations[statefulsetDesiredReplicasAnnotationKey]
 	if !ok {
-		level.Debug(c.logger).Log("msg", sts.Name, "desired replicas from spec:", *sts.Spec.Replicas)
+		level.Debug(c.logger).Log("msg", fmt.Sprintf("Statefulset %s desired replicas from spec: %v", sts.Name, *sts.Spec.Replicas))
 		return *sts.Spec.Replicas
 	}
 	replicas, err := strconv.Atoi(desiredReplicas)
 	if err != nil {
-		level.Debug(c.logger).Log("msg", sts.Name, "desired replicas from spec:", *sts.Spec.Replicas)
+		level.Debug(c.logger).Log("msg", fmt.Sprintf("Statefulset %s desired replicas from spec: %v", sts.Name, *sts.Spec.Replicas))
 		return *sts.Spec.Replicas
 	}
-	level.Debug(c.logger).Log("msg", sts.Name, "desired replicas from annotation:", int32(replicas))
+	level.Debug(c.logger).Log("msg", fmt.Sprintf("Statefulset %s desired replicas from annotation: %v", sts.Name, replicas))
 	return int32(replicas)
 }
 
