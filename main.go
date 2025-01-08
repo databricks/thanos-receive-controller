@@ -17,6 +17,12 @@ import (
 	"syscall"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/oklog/run"
@@ -25,6 +31,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/thanos-io/thanos/pkg/receive"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,6 +40,7 @@ import (
 	appsinformers "k8s.io/client-go/informers/apps/v1"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
+	scaleclient "k8s.io/client-go/scale"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/kubectl/pkg/util/podutils"
@@ -57,6 +65,13 @@ const (
 	create label = "create"
 	update label = "update"
 	other  label = "other"
+
+	rolloutMirrorReplicasFromResourceAnnotationKeyPrefix     = "grafana.com/rollout-mirror-replicas-from-resource"
+	RolloutMirrorReplicasFromResourceNameAnnotationKey       = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-name"
+	RolloutMirrorReplicasFromResourceKindAnnotationKey       = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-kind"
+	RolloutMirrorReplicasFromResourceAPIVersionAnnotationKey = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-api-version" // optional
+	RolloutMirrorReplicasFromResourceWriteBackStatusReplicas = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-write-back"  // optional
+
 )
 
 type CmdConfig struct {
@@ -129,7 +144,23 @@ func main() {
 		stdlog.Fatal(err)
 	}
 
-	klient, err := kubernetes.NewForConfig(konfig)
+	httpClient, err := rest.HTTPClientFor(konfig)
+	if err != nil {
+		stdlog.Fatal(err)
+	}
+
+	klient, err := kubernetes.NewForConfigAndClient(konfig, httpClient)
+	if err != nil {
+		stdlog.Fatal(err)
+	}
+
+	restMapper, err := apiutil.NewDynamicRESTMapper(konfig, httpClient)
+	if err != nil {
+		stdlog.Fatal(err)
+	}
+
+	scaleKindResolver := scaleclient.NewDiscoveryScaleKindResolver(klient.Discovery())
+	scaleClient, err := scaleclient.NewForConfig(konfig, restMapper, dynamic.LegacyAPIPathResolverFunc, scaleKindResolver)
 	if err != nil {
 		stdlog.Fatal(err)
 	}
@@ -166,7 +197,7 @@ func main() {
 			migrationState:         config.migrationState,
 		}
 
-		c := newController(klient, logger, opt)
+		c := newController(klient, logger, opt, restMapper, scaleClient)
 		c.registerMetrics(reg)
 		done := make(chan struct{})
 
@@ -219,6 +250,65 @@ type prometheusReflectorMetrics struct {
 	watchDurationMetric       prometheus.Summary
 	itemsInWatchMetric        prometheus.Summary
 	lastResourceVersionMetric prometheus.Gauge
+}
+
+func getCustomScaleResourceForStatefulset(ctx context.Context, sts *appsv1.StatefulSet, restMapper meta.RESTMapper, scalesGetter scaleclient.ScalesGetter) (*autoscalingv1.Scale, schema.GroupVersionResource, string, error) {
+	annotations := sts.GetAnnotations()
+	name := annotations[RolloutMirrorReplicasFromResourceNameAnnotationKey]
+	kind := annotations[RolloutMirrorReplicasFromResourceKindAnnotationKey]
+	if name == "" || kind == "" {
+		return nil, schema.GroupVersionResource{}, "", nil
+	}
+
+	apiVersion := annotations[RolloutMirrorReplicasFromResourceAPIVersionAnnotationKey]
+
+	targetGV, err := schema.ParseGroupVersion(apiVersion)
+	if err != nil {
+		return nil, schema.GroupVersionResource{}, "", fmt.Errorf("invalid API version in %s annotation: %v", RolloutMirrorReplicasFromResourceAPIVersionAnnotationKey, err)
+	}
+
+	targetGK := schema.GroupKind{
+		Group: targetGV.Group,
+		Kind:  kind,
+	}
+
+	reference := fmt.Sprintf("%s/%s", kind, name)
+
+	mappings, err := restMapper.RESTMappings(targetGK)
+	if err != nil {
+		return nil, schema.GroupVersionResource{}, "", fmt.Errorf("unable to find custom resource mapping for reference resource %s: %v", reference, err)
+	}
+
+	scale, gvr, err := scaleForResourceMappings(ctx, sts.Namespace, name, mappings, scalesGetter)
+	if err != nil {
+		return nil, schema.GroupVersionResource{}, "", fmt.Errorf("failed to query scale subresource for %s: %v", reference, err)
+	}
+
+	return scale, gvr, name, nil
+}
+
+// copied from https://github.com/kubernetes/kubernetes/blob/3c4512c6ccca066d590a33b6333198b5ed813da2/pkg/controller/podautoscaler/horizontal.go#L1336-L1358
+func scaleForResourceMappings(ctx context.Context, namespace, name string, mappings []*meta.RESTMapping, scalesGetter scaleclient.ScalesGetter) (*autoscalingv1.Scale, schema.GroupVersionResource, error) {
+	var firstErr error
+	for i, mapping := range mappings {
+		scale, err := scalesGetter.Scales(namespace).Get(ctx, mapping.Resource.GroupResource(), name, metav1.GetOptions{})
+		if err == nil {
+			return scale, mapping.Resource, nil
+		}
+
+		// if this is the first error, remember it,
+		// then go on and try other mappings until we find a good one
+		if i == 0 {
+			firstErr = err
+		}
+	}
+
+	// make sure we handle an empty set of mappings
+	if firstErr == nil {
+		firstErr = fmt.Errorf("unrecognized resource")
+	}
+
+	return nil, schema.GroupVersionResource{}, firstErr
 }
 
 func newReflectorMetrics(reg *prometheus.Registry) prometheusReflectorMetrics {
@@ -366,6 +456,9 @@ type controller struct {
 	cmapInf cache.SharedIndexInformer
 	ssetInf cache.SharedIndexInformer
 
+	restMapper  meta.RESTMapper
+	scaleClient scaleclient.ScalesGetter
+
 	reconcileAttempts                 prometheus.Counter
 	reconcileErrors                   *prometheus.CounterVec
 	configmapChangeAttempts           prometheus.Counter
@@ -377,7 +470,7 @@ type controller struct {
 	pantheonMigrationState            *prometheus.GaugeVec
 }
 
-func newController(klient kubernetes.Interface, logger log.Logger, o *options) *controller {
+func newController(klient kubernetes.Interface, logger log.Logger, o *options, restMapper meta.RESTMapper, scaleClient scaleclient.ScalesGetter) *controller {
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
@@ -394,6 +487,9 @@ func newController(klient kubernetes.Interface, logger log.Logger, o *options) *
 		ssetInf: appsinformers.NewFilteredStatefulSetInformer(klient, o.namespace, resyncPeriod, nil, func(lo *metav1.ListOptions) {
 			lo.LabelSelector = labels.Set{o.labelKey: o.labelValue}.String()
 		}),
+
+		restMapper:  restMapper,
+		scaleClient: scaleClient,
 
 		reconcileAttempts: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "thanos_receive_controller_reconcile_attempts_total",
