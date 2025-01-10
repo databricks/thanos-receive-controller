@@ -165,7 +165,6 @@ func main() {
 			podAzAnnotationKey:     config.podAzAnnotationKey,
 			migrationState:         config.migrationState,
 		}
-
 		c := newController(klient, logger, opt)
 		c.registerMetrics(reg)
 		done := make(chan struct{})
