@@ -713,7 +713,7 @@ func (c *controller) waitForPod(ctx context.Context, name string) error {
 func (c *controller) populate(ctx context.Context, hashrings []receive.HashringConfig, statefulsets map[string][]*appsv1.StatefulSet) {
 	for i, h := range hashrings {
 		stsList, exists := statefulsets[h.Hashring]
-		// Sort by sts name to for deterministic endpoints order
+		// Sort by sts name for deterministic endpoints order
 		sort.Slice(stsList, func(i, j int) bool {
 			return stsList[i].Name < stsList[j].Name
 		})
