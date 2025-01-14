@@ -26,17 +26,24 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/thanos-io/thanos/pkg/receive"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/dynamic"
 	appsinformers "k8s.io/client-go/informers/apps/v1"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/scale"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/kubectl/pkg/util/podutils"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
 
 type label = string
@@ -58,6 +65,12 @@ const (
 	create label = "create"
 	update label = "update"
 	other  label = "other"
+
+	// Scaling based on reference resource. Refer to https://github.com/grafana/rollout-operator?tab=readme-ov-file#scaling-based-on-reference-resource
+	rolloutMirrorReplicasFromResourceAnnotationKeyPrefix     = "grafana.com/rollout-mirror-replicas-from-resource"
+	RolloutMirrorReplicasFromResourceNameAnnotationKey       = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-name"
+	RolloutMirrorReplicasFromResourceKindAnnotationKey       = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-kind"
+	RolloutMirrorReplicasFromResourceAPIVersionAnnotationKey = rolloutMirrorReplicasFromResourceAnnotationKeyPrefix + "-api-version" // optional
 )
 
 type CmdConfig struct {
@@ -79,6 +92,7 @@ type CmdConfig struct {
 	useAzAwareHashRing     bool
 	podAzAnnotationKey     string
 	migrationState         string
+	scaleWithCRD           bool
 }
 
 func parseFlags() CmdConfig {
@@ -102,6 +116,7 @@ func parseFlags() CmdConfig {
 	flag.BoolVar(&config.useAzAwareHashRing, "use-az-aware-hashring", false, "A boolean to use az aware hashring to comply with Thanos v0.32+")
 	flag.StringVar(&config.podAzAnnotationKey, "pod-az-annotation-key", "", "pod annotation key for AZ Info, If not specified or key not found, will use sts name as AZ key")
 	flag.StringVar(&config.migrationState, "migration-state", "no-state", "[Databricks Internal] internal pantheon migration state info")
+	flag.BoolVar(&config.scaleWithCRD, "scale-with-crd", false, "Use replica number from CRD as source of truth for Statefulset scaling")
 	flag.Parse()
 
 	return config
@@ -130,9 +145,31 @@ func main() {
 		stdlog.Fatal(err)
 	}
 
-	klient, err := kubernetes.NewForConfig(konfig)
+	httpClient, err := rest.HTTPClientFor(konfig)
 	if err != nil {
 		stdlog.Fatal(err)
+	}
+
+	klient, err := kubernetes.NewForConfigAndClient(konfig, httpClient)
+	if err != nil {
+		stdlog.Fatal(err)
+	}
+
+	var restMapper meta.RESTMapper
+	var scaleClient scale.ScalesGetter
+	{
+		var err error
+		if config.scaleWithCRD {
+			restMapper, err = apiutil.NewDynamicRESTMapper(konfig, httpClient)
+			if err != nil {
+				stdlog.Fatal(err)
+			}
+			scaleKindResolver := scale.NewDiscoveryScaleKindResolver(klient.Discovery())
+			scaleClient, err = scale.NewForConfig(konfig, restMapper, dynamic.LegacyAPIPathResolverFunc, scaleKindResolver)
+			if err != nil {
+				stdlog.Fatal(err)
+			}
+		}
 	}
 
 	reg := prometheus.NewRegistry()
@@ -166,7 +203,7 @@ func main() {
 			podAzAnnotationKey:     config.podAzAnnotationKey,
 			migrationState:         config.migrationState,
 		}
-		c := newController(klient, logger, opt)
+		c := newController(klient, restMapper, scaleClient, logger, opt)
 		c.registerMetrics(reg)
 		done := make(chan struct{})
 
@@ -352,6 +389,7 @@ type options struct {
 	useAzAwareHashRing     bool
 	podAzAnnotationKey     string
 	migrationState         string
+	scaleWithCRD           bool
 }
 
 type controller struct {
@@ -362,9 +400,11 @@ type controller struct {
 	// should be fine without a mutex, as sync only ever runs once at a time.
 	replicas map[string]int32
 
-	klient  kubernetes.Interface
-	cmapInf cache.SharedIndexInformer
-	ssetInf cache.SharedIndexInformer
+	klient      kubernetes.Interface
+	cmapInf     cache.SharedIndexInformer
+	ssetInf     cache.SharedIndexInformer
+	restMapper  meta.RESTMapper
+	scaleClient scale.ScalesGetter
 
 	reconcileAttempts                 prometheus.Counter
 	reconcileErrors                   *prometheus.CounterVec
@@ -377,7 +417,7 @@ type controller struct {
 	pantheonMigrationState            *prometheus.GaugeVec
 }
 
-func newController(klient kubernetes.Interface, logger log.Logger, o *options) *controller {
+func newController(klient kubernetes.Interface, restMapper meta.RESTMapper, scaleClient scale.ScalesGetter, logger log.Logger, o *options) *controller {
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
@@ -394,6 +434,8 @@ func newController(klient kubernetes.Interface, logger log.Logger, o *options) *
 		ssetInf: appsinformers.NewFilteredStatefulSetInformer(klient, o.namespace, resyncPeriod, nil, func(lo *metav1.ListOptions) {
 			lo.LabelSelector = labels.Set{o.labelKey: o.labelValue}.String()
 		}),
+		restMapper:  restMapper,
+		scaleClient: scaleClient,
 
 		reconcileAttempts: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "thanos_receive_controller_reconcile_attempts_total",
@@ -618,9 +660,13 @@ func (c *controller) sync(ctx context.Context) {
 		}
 
 		stsReplica, exist := c.replicas[sts.Name]
+		desiredReplicas, err := c.getStsDesiredReplicas(ctx, sts)
+		if err != nil {
+			level.Error(c.logger).Log("msg", "failed to get desired replicas for Statefulset", "sts", sts.Name, "err", err)
+		}
 		// If hashring is not initialized, need to wait for all pods ready within statefulset before generating hashring
 		if !exist && c.options.allowOnlyReadyReplicas {
-			for i := int32(0); i < *sts.Spec.Replicas; i++ {
+			for i := int32(0); i < desiredReplicas; i++ {
 				start := time.Now()
 				podName := fmt.Sprintf("%s-%d", sts.Name, i)
 
@@ -631,10 +677,10 @@ func (c *controller) sync(ctx context.Context) {
 
 				level.Debug(c.logger).Log("msg", "waited until new pod was ready during hashring intialization", "pod", podName, "duration", time.Since(start))
 			}
-		} else if exist && stsReplica < *sts.Spec.Replicas {
+		} else if exist && stsReplica < desiredReplicas {
 			// If there's an increase in replicas we poll for the new replicas to be ready
 			// Iterate over new replicas to wait until they are running
-			for i := stsReplica; i < *sts.Spec.Replicas; i++ {
+			for i := stsReplica; i < desiredReplicas; i++ {
 				start := time.Now()
 				podName := fmt.Sprintf("%s-%d", sts.Name, i)
 
@@ -647,7 +693,7 @@ func (c *controller) sync(ctx context.Context) {
 			}
 		}
 
-		c.replicas[sts.Name] = *sts.Spec.Replicas
+		c.replicas[sts.Name] = desiredReplicas
 
 		if _, ok := statefulsets[hashring]; !ok {
 			statefulsets[hashring] = []*appsv1.StatefulSet{}
@@ -725,7 +771,11 @@ func (c *controller) populate(ctx context.Context, hashrings []receive.HashringC
 		var endpoints []receive.Endpoint
 
 		for _, sts := range stsList {
-			for i := 0; i < int(*sts.Spec.Replicas); i++ {
+			desiredReplicas, err := c.getStsDesiredReplicas(ctx, sts)
+			if err != nil {
+				level.Error(c.logger).Log("msg", "failed to get desired replicas for Statefulset", "sts", sts.Name, "err", err)
+			}
+			for i := 0; i < int(desiredReplicas); i++ {
 				podName := fmt.Sprintf("%s-%d", sts.Name, i)
 				pod, err := c.klient.CoreV1().Pods(c.options.namespace).Get(ctx, podName, metav1.GetOptions{})
 
@@ -886,6 +936,26 @@ func (c *controller) annotatePods(ctx context.Context) {
 	}
 }
 
+func (c *controller) getStsDesiredReplicas(ctx context.Context, sts *appsv1.StatefulSet) (int32, error) {
+	if sts == nil {
+		return 0, fmt.Errorf("statefulset is nil")
+	}
+	if !c.options.scaleWithCRD {
+		return *sts.Spec.Replicas, nil
+	}
+	if c.restMapper == nil || c.scaleClient == nil {
+		return *sts.Spec.Replicas, fmt.Errorf("scale with CRD option is enabled but restMapper or scaleClient is not set")
+	}
+	scaleObj, referenceGVR, referenceName, err := getCustomScaleResourceForStatefulset(ctx, sts, c.restMapper, c.scaleClient)
+	if err != nil {
+		return *sts.Spec.Replicas, err
+	}
+	referenceResource := fmt.Sprintf("%s/%s", referenceGVR.Resource, referenceName)
+	referenceResourceDesiredReplicas := scaleObj.Spec.Replicas
+	level.Debug(c.logger).Log("msg", "got Statefulset desired replicas from custom resource", "sts", sts.Name, "sts.Spec.Replicas", sts.Spec.Replicas, "resource", referenceResource, "desiredReplicas", referenceResourceDesiredReplicas)
+	return referenceResourceDesiredReplicas, nil
+}
+
 // hashAsMetricValue generates metric value from hash of data.
 func hashAsMetricValue(data []byte) float64 {
 	sum := md5.Sum(data) //nolint:gosec
@@ -941,4 +1011,64 @@ func (q *queue) get() bool {
 	defer q.Unlock()
 
 	return q.ok
+}
+
+// Copied from https://github.com/grafana/rollout-operator/blob/e5d5b19e33b4317f288eeebbb98c4d69e7be7aa6/pkg/controller/custom_resource_replicas.go#L91.
+func getCustomScaleResourceForStatefulset(ctx context.Context, sts *appsv1.StatefulSet, restMapper meta.RESTMapper, scalesGetter scale.ScalesGetter) (*autoscalingv1.Scale, schema.GroupVersionResource, string, error) {
+	annotations := sts.GetAnnotations()
+	name := annotations[RolloutMirrorReplicasFromResourceNameAnnotationKey]
+	kind := annotations[RolloutMirrorReplicasFromResourceKindAnnotationKey]
+	if name == "" || kind == "" {
+		return nil, schema.GroupVersionResource{}, "", nil
+	}
+
+	apiVersion := annotations[RolloutMirrorReplicasFromResourceAPIVersionAnnotationKey]
+
+	targetGV, err := schema.ParseGroupVersion(apiVersion)
+	if err != nil {
+		return nil, schema.GroupVersionResource{}, "", fmt.Errorf("invalid API version in %s annotation: %v", RolloutMirrorReplicasFromResourceAPIVersionAnnotationKey, err)
+	}
+
+	targetGK := schema.GroupKind{
+		Group: targetGV.Group,
+		Kind:  kind,
+	}
+
+	reference := fmt.Sprintf("%s/%s", kind, name)
+
+	mappings, err := restMapper.RESTMappings(targetGK)
+	if err != nil {
+		return nil, schema.GroupVersionResource{}, "", fmt.Errorf("unable to find custom resource mapping for reference resource %s: %v", reference, err)
+	}
+
+	scale, gvr, err := scaleForResourceMappings(ctx, sts.Namespace, name, mappings, scalesGetter)
+	if err != nil {
+		return nil, schema.GroupVersionResource{}, "", fmt.Errorf("failed to query scale subresource for %s: %v", reference, err)
+	}
+
+	return scale, gvr, name, nil
+}
+
+// Copied from https://github.com/kubernetes/kubernetes/blob/3c4512c6ccca066d590a33b6333198b5ed813da2/pkg/controller/podautoscaler/horizontal.go#L1336-L1358.
+func scaleForResourceMappings(ctx context.Context, namespace, name string, mappings []*meta.RESTMapping, scalesGetter scale.ScalesGetter) (*autoscalingv1.Scale, schema.GroupVersionResource, error) {
+	var firstErr error
+	for i, mapping := range mappings {
+		scale, err := scalesGetter.Scales(namespace).Get(ctx, mapping.Resource.GroupResource(), name, metav1.GetOptions{})
+		if err == nil {
+			return scale, mapping.Resource, nil
+		}
+
+		// if this is the first error, remember it,
+		// then go on and try other mappings until we find a good one
+		if i == 0 {
+			firstErr = err
+		}
+	}
+
+	// make sure we handle an empty set of mappings
+	if firstErr == nil {
+		firstErr = fmt.Errorf("unrecognized resource")
+	}
+
+	return nil, schema.GroupVersionResource{}, firstErr
 }
