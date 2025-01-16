@@ -202,6 +202,7 @@ func main() {
 			useAzAwareHashRing:     config.useAzAwareHashRing,
 			podAzAnnotationKey:     config.podAzAnnotationKey,
 			migrationState:         config.migrationState,
+			scaleWithCRD:           config.scaleWithCRD,
 		}
 		c := newController(klient, restMapper, scaleClient, logger, opt)
 		c.registerMetrics(reg)
