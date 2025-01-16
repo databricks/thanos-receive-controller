@@ -666,7 +666,7 @@ func (c *controller) sync(ctx context.Context) {
 		}
 		// If hashring is not initialized, need to wait for all pods ready within statefulset before generating hashring
 		if !exist && c.options.allowOnlyReadyReplicas {
-			for i := int32(0); i < desiredReplicas; i++ {
+			for i := range desiredReplicas {
 				start := time.Now()
 				podName := fmt.Sprintf("%s-%d", sts.Name, i)
 
@@ -775,7 +775,7 @@ func (c *controller) populate(ctx context.Context, hashrings []receive.HashringC
 			if err != nil {
 				level.Error(c.logger).Log("msg", "failed to get desired replicas for Statefulset", "sts", sts.Name, "err", err)
 			}
-			for i := 0; i < int(desiredReplicas); i++ {
+			for i := range desiredReplicas {
 				podName := fmt.Sprintf("%s-%d", sts.Name, i)
 				pod, err := c.klient.CoreV1().Pods(c.options.namespace).Get(ctx, podName, metav1.GetOptions{})
 
@@ -796,7 +796,7 @@ func (c *controller) populate(ctx context.Context, hashrings []receive.HashringC
 				}
 				// If cluster domain is empty string we don't want dot after svc.
 
-				endpoint := *c.populateEndpoint(sts, i, err, pod)
+				endpoint := *c.populateEndpoint(sts, int(i), err, pod)
 				endpoints = append(endpoints, endpoint)
 
 				level.Info(c.logger).Log("msg", "Hashring got an endpoint", "hashring", h.Hashring, "endpoint:", endpoint.Address, "AZ", endpoint.AZ)
@@ -952,7 +952,8 @@ func (c *controller) getStsDesiredReplicas(ctx context.Context, sts *appsv1.Stat
 	}
 	referenceResource := fmt.Sprintf("%s/%s", referenceGVR.Resource, referenceName)
 	referenceResourceDesiredReplicas := scaleObj.Spec.Replicas
-	level.Debug(c.logger).Log("msg", "got Statefulset desired replicas from custom resource", "sts", sts.Name, "sts.Spec.Replicas", sts.Spec.Replicas, "resource", referenceResource, "desiredReplicas", referenceResourceDesiredReplicas)
+	level.Debug(c.logger).Log("msg", "got Statefulset desired replicas from custom resource", "sts", sts.Name,
+		"sts.Spec.Replicas", sts.Spec.Replicas, "resource", referenceResource, "desiredReplicas", referenceResourceDesiredReplicas)
 	return referenceResourceDesiredReplicas, nil
 }
 
@@ -1014,7 +1015,8 @@ func (q *queue) get() bool {
 }
 
 // Copied from https://github.com/grafana/rollout-operator/blob/e5d5b19e33b4317f288eeebbb98c4d69e7be7aa6/pkg/controller/custom_resource_replicas.go#L91.
-func getCustomScaleResourceForStatefulset(ctx context.Context, sts *appsv1.StatefulSet, restMapper meta.RESTMapper, scalesGetter scale.ScalesGetter) (*autoscalingv1.Scale, schema.GroupVersionResource, string, error) {
+func getCustomScaleResourceForStatefulset(ctx context.Context, sts *appsv1.StatefulSet, restMapper meta.RESTMapper,
+	scalesGetter scale.ScalesGetter) (*autoscalingv1.Scale, schema.GroupVersionResource, string, error) {
 	annotations := sts.GetAnnotations()
 	name := annotations[RolloutMirrorReplicasFromResourceNameAnnotationKey]
 	kind := annotations[RolloutMirrorReplicasFromResourceKindAnnotationKey]
@@ -1026,7 +1028,7 @@ func getCustomScaleResourceForStatefulset(ctx context.Context, sts *appsv1.State
 
 	targetGV, err := schema.ParseGroupVersion(apiVersion)
 	if err != nil {
-		return nil, schema.GroupVersionResource{}, "", fmt.Errorf("invalid API version in %s annotation: %v", RolloutMirrorReplicasFromResourceAPIVersionAnnotationKey, err)
+		return nil, schema.GroupVersionResource{}, "", fmt.Errorf("invalid API version in %s annotation: %w", RolloutMirrorReplicasFromResourceAPIVersionAnnotationKey, err)
 	}
 
 	targetGK := schema.GroupKind{
@@ -1038,12 +1040,12 @@ func getCustomScaleResourceForStatefulset(ctx context.Context, sts *appsv1.State
 
 	mappings, err := restMapper.RESTMappings(targetGK)
 	if err != nil {
-		return nil, schema.GroupVersionResource{}, "", fmt.Errorf("unable to find custom resource mapping for reference resource %s: %v", reference, err)
+		return nil, schema.GroupVersionResource{}, "", fmt.Errorf("unable to find custom resource mapping for reference resource %s: %w", reference, err)
 	}
 
 	scale, gvr, err := scaleForResourceMappings(ctx, sts.Namespace, name, mappings, scalesGetter)
 	if err != nil {
-		return nil, schema.GroupVersionResource{}, "", fmt.Errorf("failed to query scale subresource for %s: %v", reference, err)
+		return nil, schema.GroupVersionResource{}, "", fmt.Errorf("failed to query scale subresource for %s: %w", reference, err)
 	}
 
 	return scale, gvr, name, nil
