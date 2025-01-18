@@ -1054,7 +1054,7 @@ func TestControllerConfigmapUpdateWithAzAware(t *testing.T) {
 func setupController(ctx context.Context, t *testing.T, klient kubernetes.Interface, opts *options) func() {
 	t.Helper()
 
-	c := newController(klient, nil, opts)
+	c := newController(klient, nil, nil, nil, opts)
 	stop := make(chan struct{})
 
 	//nolint:staticcheck
