@@ -951,6 +951,9 @@ func (c *controller) getStsDesiredReplicas(ctx context.Context, sts *appsv1.Stat
 	if err != nil {
 		return *sts.Spec.Replicas, err
 	}
+	if scaleObj == nil {
+		return *sts.Spec.Replicas, nil
+	}
 	referenceResource := fmt.Sprintf("%s/%s", referenceGVR.Resource, referenceName)
 	referenceResourceDesiredReplicas := scaleObj.Spec.Replicas
 	level.Debug(c.logger).Log("msg", "got Statefulset desired replicas from custom resource", "sts", sts.Name,
