@@ -654,10 +654,12 @@ func (c *controller) sync(ctx context.Context) {
 
 		if !ok {
 			level.Error(c.logger).Log("msg", "failed type assertion from expected StatefulSet")
+			continue
 		}
 
 		hashring, ok := sts.Labels[hashringLabelKey]
 		if !ok {
+			level.Error(c.logger).Log("msg", "failed to get hashring label from StatefulSet", "sts", sts.Name)
 			continue
 		}
 
@@ -665,6 +667,7 @@ func (c *controller) sync(ctx context.Context) {
 		desiredReplicas, err := c.getStsDesiredReplicas(ctx, sts)
 		if err != nil {
 			level.Error(c.logger).Log("msg", "failed to get desired replicas for Statefulset", "sts", sts.Name, "err", err)
+			continue
 		}
 		stsReplicas[sts.Name] = desiredReplicas
 		// If hashring is not initialized, need to wait for all pods ready within statefulset before generating hashring
@@ -774,11 +777,7 @@ func (c *controller) populate(ctx context.Context, hashrings []receive.HashringC
 		var endpoints []receive.Endpoint
 
 		for _, sts := range stsList {
-			desiredReplicas, ok := stsReplicas[sts.Name]
-			if !ok {
-				level.Error(c.logger).Log("msg", "failed to get desired replicas for Statefulset", "sts", sts.Name)
-				continue
-			}
+			desiredReplicas := stsReplicas[sts.Name]
 			for i := range desiredReplicas {
 				podName := fmt.Sprintf("%s-%d", sts.Name, i)
 				pod, err := c.klient.CoreV1().Pods(c.options.namespace).Get(ctx, podName, metav1.GetOptions{})
